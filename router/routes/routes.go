@@ -13,8 +13,9 @@ type Routes struct {
 }
 
 func Register(r *mux.Router) {
-	// se tiver outras rotas (ex: booksRoutes), coloca aqui também
-	routes := usersRoutes
+	var routes []Routes
+	routes = append(routes, booksRoutes...)
+	routes = append(routes, usersRoutes...)
 
 	for _, route := range routes {
 		r.HandleFunc(route.URI, route.Func).Methods(route.Method)

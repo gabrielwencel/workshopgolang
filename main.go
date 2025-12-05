@@ -1,15 +1,15 @@
 package main
 
 import (
+	"Api-Aula1/config"
 	"Api-Aula1/router"
 	"log"
 	"net/http"
 )
 
 func main() {
+	config.LoadEnv()
 	r := router.New()
-
-	const addr = ":8080"
-	log.Printf("Servidor ouvindo em %s ...", addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+	log.Printf("Servidor ouvindo em %s ...", config.Port)
+	log.Fatal(http.ListenAndServe(config.Port, r))
 }

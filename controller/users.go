@@ -2,136 +2,127 @@ package controller
 
 import (
 	"Api-Aula1/models"
+	"Api-Aula1/persistency"
 	"Api-Aula1/repository"
+	"Api-Aula1/responses"
+	"Api-Aula1/security"
 	"encoding/json"
+	"errors"
 	"io"
-	"log"
 	"net/http"
-	"strconv"
-
-	"github.com/gorilla/mux"
+	"strings"
 )
 
-// repositório global em memória
-var usersRepo = repository.NewUsersRepository()
-
-// --------- CREATE (POST /users) ---------
-
 func CreateUser(w http.ResponseWriter, r *http.Request) {
-	log.Print("CreateUser chamado")
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
+	// Lê o request.Body
+	bodyRequest, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Erro ao ler body", http.StatusBadRequest)
+		responses.Err(w, http.StatusUnprocessableEntity, err)
 		return
 	}
 	defer r.Body.Close()
 
-	var user models.Users
-	if err := json.Unmarshal(body, &user); err != nil {
-		http.Error(w, "JSON inválido", http.StatusBadRequest)
+	// Descompacta (Unmarshal) o conteúdo JSON em uma Struct
+	var newUser models.Users
+	if err = json.Unmarshal(bodyRequest, &newUser); err != nil {
+		responses.Err(w, http.StatusBadRequest, err)
 		return
 	}
 
-	if err := user.Prepare("create"); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	// Chama os métodos de preparação do User
+	if err = newUser.Prepare("create"); err != nil {
+		responses.Err(w, http.StatusBadRequest, err)
 		return
 	}
 
-	created, err := usersRepo.Create(user)
+	// Conexão com o banco
+	db, err := persistency.Connect()
 	if err != nil {
-		http.Error(w, "Erro ao criar usuário", http.StatusInternalServerError)
+		responses.Err(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	// Instanciar Repo
+	repo := repository.NewUsersRepo(db)
+	newUser.ID, err = repo.Create(newUser)
+	if err != nil {
+		responses.Err(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	responses.JSON(w, http.StatusCreated, newUser)
 }
 
-// --------- READ (GET /users) ---------
+// ==========================
+// LOGIN
+// ==========================
 
-func FetchUser(w http.ResponseWriter, r *http.Request) {
-	log.Print("FetchUser chamado")
-
-	users, err := usersRepo.FindAll()
-	if err != nil {
-		http.Error(w, "Erro ao buscar usuários", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(users)
+// Struct específica para o body do login
+type loginInput struct {
+	Email    string `json:"email_usuario"`
+	Password string `json:"senha"`
 }
 
-// --------- UPDATE (PUT /users/{userID}) ---------
-
-func UpdateUser(w http.ResponseWriter, r *http.Request) {
-	log.Print("UpdateUser chamado")
-
-	vars := mux.Vars(r)
-	idStr := vars["userID"]
-
-	id, err := strconv.ParseUint(idStr, 10, 64)
+func Login(w http.ResponseWriter, r *http.Request) {
+	// Lê o body da requisição
+	bodyRequest, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "ID inválido", http.StatusBadRequest)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Erro ao ler body", http.StatusBadRequest)
+		responses.Err(w, http.StatusUnprocessableEntity, err)
 		return
 	}
 	defer r.Body.Close()
 
-	var user models.Users
-	if err := json.Unmarshal(body, &user); err != nil {
-		http.Error(w, "JSON inválido", http.StatusBadRequest)
+	var input loginInput
+	if err = json.Unmarshal(bodyRequest, &input); err != nil {
+		responses.Err(w, http.StatusBadRequest, err)
 		return
 	}
 
-	user.ID = id
-	if err := user.Prepare("update"); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	// Validação básica
+	input.Email = strings.TrimSpace(strings.ToLower(input.Email))
+	if input.Email == "" || input.Password == "" {
+		responses.Err(w, http.StatusBadRequest, errors.New("e-mail e senha são obrigatórios"))
 		return
 	}
 
-	updated, err := usersRepo.Update(id, user)
+	// Conecta no banco
+	db, err := persistency.Connect()
 	if err != nil {
-		http.Error(w, "Usuário não encontrado", http.StatusNotFound)
+		responses.Err(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer db.Close()
+
+	repo := repository.NewUsersRepo(db)
+
+	// Busca usuário pelo e-mail
+	userFromDB, err := repo.FindByEmail(input.Email)
+	if err != nil {
+		// Não expõe se foi e-mail ou senha para segurança
+		responses.Err(w, http.StatusUnauthorized, errors.New("usuário ou senha inválidos"))
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updated)
+	// Compara a senha enviada com o hash salvo no banco
+	if err := security.Verify(userFromDB.Password, input.Password); err != nil {
+		// Se der erro aqui, senha está errada
+		responses.Err(w, http.StatusUnauthorized, errors.New("usuário ou senha inválidos"))
+		return
+	}
+
+	// Login OK – por segurança, não devolve o hash da senha
+	userFromDB.Password = ""
+
+	responses.JSON(w, http.StatusOK, userFromDB)
 }
 
-// --------- DELETE (DELETE /users/{userID}) ---------
+func FetchUser(writer http.ResponseWriter, request *http.Request) {
 
-func DeleteUser(w http.ResponseWriter, r *http.Request) {
-	log.Print("DeleteUser chamado")
-
-	vars := mux.Vars(r)
-	idStr := vars["userID"]
-
-	id, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "ID inválido", http.StatusBadRequest)
-		return
-	}
-
-	if err := usersRepo.Delete(id); err != nil {
-		http.Error(w, "Usuário não encontrado", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
+
+func UpdateUser(writer http.ResponseWriter, request *http.Request) {
+
+}
+
+func DeleteUser(writer http.ResponseWriter, request *http.Request) {}

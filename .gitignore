@@ -1,0 +1,28 @@
+# Arquivo de variáveis de ambiente
+.env
+*.env
+
+# Go build
+/bin/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Diretórios gerados pelo Go
+/pkg/
+/vendor/
+
+# GoLand / IntelliJ
+.idea/
+*.iml
+
+# Cache e logs
+*.log
+*.out
+
+# Módulos
+go.work
+go.work.sum

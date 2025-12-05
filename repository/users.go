@@ -2,81 +2,70 @@ package repository
 
 import (
 	"Api-Aula1/models"
-	"errors"
-	"sync"
+	"database/sql"
 )
 
-type UsersRepository struct {
-	mu     sync.Mutex
-	data   map[uint64]models.Users
-	lastID uint64
+type UsersRepo struct {
+	db *sql.DB
 }
 
-func NewUsersRepository() *UsersRepository {
-	return &UsersRepository{
-		data: make(map[uint64]models.Users),
+func NewUsersRepo(db *sql.DB) *UsersRepo {
+	return &UsersRepo{db}
+}
+
+func (u UsersRepo) Create(user models.Users) (int8, error) {
+	query := `INSERT INTO treehousedb.users(
+                    name,
+                    email,
+                    password,
+                    cpf
+                ) VALUES (?,?,?,?)`
+
+	statement, err := u.db.Prepare(query)
+	if err != nil {
+		return 0, err
 	}
+	defer statement.Close()
+
+	result, err := statement.Exec(user.Name, user.Email, user.Password, user.CPF)
+	if err != nil {
+		return 0, err
+	}
+
+	lastid, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return int8(uint64(lastid)), nil
 }
 
-// CREATE
-func (r *UsersRepository) Create(user models.Users) (models.Users, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// 🔹 NOVO: buscar usuário pelo e-mail (para o login)
+func (u UsersRepo) FindByEmail(email string) (models.Users, error) {
+	var user models.Users
 
-	r.lastID++
-	user.ID = r.lastID
-	r.data[user.ID] = user
+	query := `SELECT 
+                    id,
+                    name,
+                    cpf,
+                    email,
+                    password
+              FROM treehousedb.users
+              WHERE email = ?
+              LIMIT 1`
+
+	row := u.db.QueryRow(query, email)
+
+	err := row.Scan(
+		&user.ID,
+		&user.Name,
+		&user.CPF,
+		&user.Email,
+		&user.Password,
+	)
+	if err != nil {
+		return models.Users{}, err
+	}
 
 	return user, nil
-}
-
-// READ ALL
-func (r *UsersRepository) FindAll() ([]models.Users, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	users := make([]models.Users, 0, len(r.data))
-	for _, u := range r.data {
-		users = append(users, u)
-	}
-	return users, nil
-}
-
-// READ BY ID (opcional, mas é útil)
-func (r *UsersRepository) FindByID(id uint64) (models.Users, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	user, ok := r.data[id]
-	if !ok {
-		return models.Users{}, errors.New("usuário não encontrado")
-	}
-	return user, nil
-}
-
-// UPDATE
-func (r *UsersRepository) Update(id uint64, user models.Users) (models.Users, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.data[id]; !ok {
-		return models.Users{}, errors.New("usuário não encontrado")
-	}
-
-	user.ID = id
-	r.data[id] = user
-	return user, nil
-}
-
-// DELETE
-func (r *UsersRepository) Delete(id uint64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.data[id]; !ok {
-		return errors.New("usuário não encontrado")
-	}
-
-	delete(r.data, id)
-	return nil
 }

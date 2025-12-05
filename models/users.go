@@ -1,134 +1,83 @@
 package models
 
 import (
+	"Api-Aula1/security"
+	"Api-Aula1/utils"
 	"errors"
 	"strings"
-	"unicode"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/badoux/checkmail"
 )
 
 type Users struct {
-	ID       uint64 `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Email    string `json:"email,omitempty"`
-	CPF      string `json:"cpf,omitempty"`
-	Password string `json:"password,omitempty"`
+	ID       int8   `json:"id"`
+	Name     string `json:"nome_usuario"`
+	CPF      string `json:"cpf"`
+	Email    string `json:"email_usuario"`
+	Password string `json:"senha"`
 }
 
-// step: "create", "update" etc.
+// Prepare executa em duas etapas:
+// 1. validate()
+// 2. format()
 func (u *Users) Prepare(step string) error {
-	if err := u.format(step); err != nil {
-		return err
-	}
-
 	if err := u.validate(step); err != nil {
 		return err
 	}
 
+	if err := u.format(step); err != nil {
+		return err
+	}
+
 	return nil
 }
 
+// Validar campos obrigatórios e formatos
 func (u *Users) validate(step string) error {
-	if step == "update" && u.ID == 0 {
-		return errors.New("id é obrigatório para atualização")
+
+	if u.Name == "" {
+		return errors.New("O nome é obrigatório e não pode estar em branco")
 	}
 
-	if strings.TrimSpace(u.Name) == "" && step == "create" {
-		return errors.New("nome é obrigatório")
+	if u.Email == "" {
+		return errors.New("O e-mail é obrigatório e não pode estar em branco")
 	}
 
-	if strings.TrimSpace(u.Email) == "" {
-		return errors.New("email é obrigatório")
+	if err := checkmail.ValidateFormat(u.Email); err != nil {
+		return errors.New("O e-mail inserido é inválido")
 	}
 
-	if strings.TrimSpace(u.CPF) == "" {
-		return errors.New("cpf é obrigatório")
+	if err := utils.CPFValidator(u.CPF); err != nil {
+		return err
 	}
 
-	if !validarCPF(u.CPF) {
-		return errors.New("cpf inválido")
-	}
-
-	if step == "create" && strings.TrimSpace(u.Password) == "" {
-		return errors.New("senha é obrigatória")
+	if step == "create" && u.Password == "" {
+		return errors.New("A senha é obrigatória e não pode estar em branco")
 	}
 
 	return nil
 }
 
+// Formatar dados e aplicar hash na senha quando for criação de usuário
 func (u *Users) format(step string) error {
-	u.Name = strings.TrimSpace(u.Name)
-	u.Email = strings.ToLower(strings.TrimSpace(u.Email))
-	u.CPF = strings.TrimSpace(u.CPF)
-	u.Password = strings.TrimSpace(u.Password)
 
-	// na criação, gera hash da senha
-	if step == "create" && u.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+	// Remover espaços
+	u.Name = strings.TrimSpace(u.Name)
+	u.Email = strings.TrimSpace(u.Email)
+	u.CPF = strings.TrimSpace(u.CPF)
+
+	// Padronizar para minúsculo
+	u.Name = strings.ToLower(u.Name)
+	u.Email = strings.ToLower(u.Email)
+
+	// Criptografar senha apenas no CREATE
+	if step == "create" {
+		hashedPassword, err := security.Hash(u.Password)
 		if err != nil {
 			return err
 		}
-		u.Password = string(hash)
+		u.Password = hashedPassword
 	}
 
 	return nil
-}
-
-// ------------------ Validador de CPF ------------------
-
-func validarCPF(cpf string) bool {
-	// mantém só dígitos
-	digits := make([]rune, 0, 11)
-	for _, r := range cpf {
-		if unicode.IsDigit(r) {
-			digits = append(digits, r)
-		}
-	}
-
-	if len(digits) != 11 {
-		return false
-	}
-
-	// rejeita todos iguais (11111111111 etc)
-	iguais := true
-	for i := 1; i < 11; i++ {
-		if digits[i] != digits[0] {
-			iguais = false
-			break
-		}
-	}
-	if iguais {
-		return false
-	}
-
-	toInt := func(r rune) int { return int(r - '0') }
-
-	// 1º dígito
-	sum := 0
-	for i := 0; i < 9; i++ {
-		sum += toInt(digits[i]) * (10 - i)
-	}
-	d1 := (sum * 10) % 11
-	if d1 == 10 {
-		d1 = 0
-	}
-	if d1 != toInt(digits[9]) {
-		return false
-	}
-
-	// 2º dígito
-	sum = 0
-	for i := 0; i < 10; i++ {
-		sum += toInt(digits[i]) * (11 - i)
-	}
-	d2 := (sum * 10) % 11
-	if d2 == 10 {
-		d2 = 0
-	}
-	if d2 != toInt(digits[10]) {
-		return false
-	}
-
-	return true
 }
